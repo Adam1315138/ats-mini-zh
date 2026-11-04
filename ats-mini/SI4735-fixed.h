@@ -4,6 +4,9 @@ class SI4735_fixed: public SI4735
 {
   private:
     uint8_t nextStationNameSegment = 0;
+    uint8_t  stationNameSeen = 0;      // PS 段位掩码（bit0~3）
+    uint16_t stationNamePi   = 0;      // 已累积数据所属的 PI 码
+    uint32_t stationNameMs   = 0;      // 最近一次收到 PS 段的时刻
     uint16_t radioTextSegments = 0;
     uint8_t radioTextVersion = 0;
 
@@ -166,27 +169,29 @@ class SI4735_fixed: public SI4735
     {
       if(!getNumRdsFifoUsed() || getRdsGroupType()!=0) return(NULL);
 
-      uint8_t address = currentRdsStatus.resp.BLOCKBL & 0x03;
-      // Segment zero starts a new cycle; gaps invalidate the current one.
-      if(address==0) nextStationNameSegment = 0;
-      if(address!=nextStationNameSegment)
-      {
-        // Repeating the last segment unchanged does not break the sequence.
-        if(address + 1==nextStationNameSegment &&
-           uint8_t(rds_buffer0A[address * 2])==currentRdsStatus.resp.BLOCKDH &&
-           uint8_t(rds_buffer0A[address * 2 + 1])==currentRdsStatus.resp.BLOCKDL)
-          return(NULL);
+      // 只处理 0A 组：0B 组的 PS 只有 2 个分段且排布不同，混进来会拼出错字
+      if(getRdsVersionCode()!=0) return(NULL);
 
-        nextStationNameSegment = 0;
-        return(NULL);
+      uint8_t address = currentRdsStatus.resp.BLOCKBL & 0x03;
+      uint16_t pi = ((uint16_t)currentRdsStatus.resp.BLOCKAH << 8)
+                  |  (uint16_t)currentRdsStatus.resp.BLOCKAL;
+      uint32_t now = millis();
+
+      // 换了电台，或超过 3 秒没有新分段：清空累积，避免跨台串字
+      if(pi != stationNamePi || (now - stationNameMs) > 3000)
+      {
+        stationNamePi   = pi;
+        stationNameSeen = 0;
       }
+      stationNameMs = now;
 
       getNext2Block(&rds_buffer0A[address * 2]);
       rds_buffer0A[8] = '\0';
-      if(++nextStationNameSegment!=4) return(NULL);
 
-      // Keep the displayed name until a complete ordered cycle arrives.
-      nextStationNameSegment = 0;
+      // 四段任意顺序收齐即显示（上游要求严格 0->1->2->3 连续到达，丢一个就永远拼不出）
+      stationNameSeen |= (1 << address);
+      if(stationNameSeen != 0x0F) return(NULL);
+
       return(rds_buffer0A);
     }
 

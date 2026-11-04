@@ -18,6 +18,25 @@ void drawLayoutDefault()
   // Draw WiFi icon
   drawWiFiIndicator(has_voltage ? WIFI_OFFSET_X : BATT_OFFSET_X - 13, WIFI_OFFSET_Y);
 
+  // 时钟显示在电压文字左侧；若 WiFi 图标亮起则继续左移避让
+  extern int battVoltTextLeft;   // 定义在 Battery.cpp，由 drawBattery 每帧更新
+  const char *clock = clockGet();
+  if(clock)
+  {
+    int clockRight = battVoltTextLeft - 8;
+    if(getWiFiStatus())
+    {
+      int wifiLimit = WIFI_OFFSET_X - 17;   // WiFi 圆弧半径 14，再留 3px
+      if(wifiLimit < clockRight) clockRight = wifiLimit;
+    }
+
+    spr.setFont(FONT_SMALL);
+    spr.setTextDatum(TR_DATUM);
+    spr.setTextColor(TH.batt_voltage);
+    spr.drawString(clock, clockRight, 0);
+    spr.setTextDatum(TL_DATUM);
+  }
+
   // Set font we are going to use
   spr.setFont(&lgfx::fonts::Orbitron_Light_24);
 

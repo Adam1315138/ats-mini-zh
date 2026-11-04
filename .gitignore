@@ -16,3 +16,19 @@ __pycache__/
 
 # Project
 build/
+
+# Local build output / toolchain (never commit)
+build*/
+tools/
+*.elf
+*.map
+
+# Full flash dumps and firmware images
+# The NVS partition inside a full dump contains Wi-Fi credentials and the device MAC
+flash_backup_*.bin
+*-full*.bin
+app0.bin
+app1.bin
+pt.bin
+otadata.bin
+readback.bin

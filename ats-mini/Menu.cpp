@@ -1,4 +1,7 @@
 #include "math.h"
+#include "CnFont.h"
+
+extern bool seekRotate;   // 搜索模式标志（定义在 ats-mini.ino）
 #include "Common.h"
 #include "Themes.h"
 #include "Utils.h"
@@ -99,20 +102,20 @@ int8_t menuIdx = MENU_VOLUME;
 
 static const char *menu[] =
 {
-  "Mode",
-  "Band",
-  "Volume",
-  "VFO A/B",
-  "Step",
-  "Seek",
-  "Scan",
-  "Memory",
-  "Squelch",
-  "Bandwidth",
-  "AGC/ATTN",
-  "AVC",
-  "SoftMute",
-  "Settings",
+  "模式",
+  "波段",
+  "音量",
+  "VFO",
+  "步进",
+  "搜台",
+  "扫描",
+  "存储",
+  "静噪",
+  "带宽",
+  "增益",
+  "补偿",
+  "软静音",
+  "设置",
 };
 
 //
@@ -150,23 +153,23 @@ int8_t settingsIdx = MENU_BRIGHTNESS;
 
 static const char *settings[] =
 {
-  "Brightness",
-  "Date/Time",
-  "UTC Offset",
-  "Sleep Timer",
-  "Sleep Mode",
-  "Off Timer",
-  "Theme",
-  "UI Layout",
-  "Zoom Menu",
-  "Scroll Dir.",
+  "亮度",
+  "日期时间",
+  "时区",
+  "睡眠定时",
+  "休眠方式",
+  "定时关机",
+  "主题",
+  "界面布局",
+  "菜单放大",
+  "滚动方向",
   "RDS",
-  "FM Stereo",
-  "FM Region",
-  "Calibration",
-  "DSP Patches",
-  "Load EiBi",
-  "Update FW",
+  "FM立体声",
+  "FM区域",
+  "校准",
+  "DSP补丁",
+  "载入EiBi",
+  "更新固件",
   "USB Port",
   "TCP Port",
   "Bluetooth",
@@ -650,12 +653,14 @@ static void doDateTime(int16_t enc)
 
 static void clickDateTime(bool shortPress)
 {
-  if(!shortPress)
+  // 单击：跳到下一个字段（年/月/日/时/分/秒）
+  if(shortPress)
   {
     dateTimeField = (dateTimeField + 1) % DATETIME_FIELD_COUNT;
     return;
   }
 
+  // 中按/长按：保存并退出
   uint32_t epoch;
   if(clockUTCDateTimeToEpoch(dateTimeYear, dateTimeMonth, dateTimeDay,
                             dateTimeHour, dateTimeMinute, dateTimeSecond, &epoch))
@@ -682,7 +687,9 @@ void doVolume(int16_t enc)
 
 static void clickVolume(bool shortPress)
 {
-  if(shortPress) muteOn(MUTE_MAIN, !muteOn(MUTE_MAIN)); else currentCmd = CMD_NONE;
+  // 单击/中按=退出音量；静音切换已移到长按手势（见 ats-mini.ino）
+  (void)shortPress;
+  currentCmd = CMD_NONE;
 }
 
 static void clickSquelch(bool shortPress)
@@ -1317,6 +1324,18 @@ bool doSideBar(uint16_t cmd, int16_t enc, int16_t enca)
   return(true);
 }
 
+//
+// 长按（>2s）语义：需要"保存"的页面先保存再退出，其余直接退出
+//
+void clickLongPress(void)
+{
+  switch(currentCmd)
+  {
+    case CMD_DATETIME: clickDateTime(false); break;   // 保存时间后再退出
+    default:           currentCmd = CMD_NONE; break;
+  }
+}
+
 bool clickHandler(uint16_t cmd, bool shortPress)
 {
   switch(cmd)
@@ -1414,7 +1433,7 @@ static void drawMenu(int x, int y, int sx)
   spr.drawRoundRect(1+x, 1+y, 76+sx, 110, 4, TH.menu_border);
   spr.setTextColor(TH.menu_hdr);
 
-  spr.drawString("Menu", 40+x+(sx/2), 12+y, FONT_SMALL);
+  spr.drawString("菜单", 40+x+(sx/2), 12+y, fontSmall("菜单", FONT_SMALL));
   spr.drawLine(1+x, 23+y, 76+sx, 23+y, TH.menu_border);
 
   spr.setFont(FONT_DEFAULT);
@@ -1431,7 +1450,7 @@ static void drawMenu(int x, int y, int sx)
       spr.setTextColor(TH.menu_item);
     }
     spr.setTextDatum(MC_DATUM);
-    spr.drawString(menu[abs((menuIdx+count+i)%count)], 40+x+(sx/2), 64+y+(i*16), FONT_SMALL);
+    { const char *mi = menu[abs((menuIdx+count+i)%count)]; spr.drawString(mi, 40+x+(sx/2), 64+y+(i*16), fontSmall(mi, FONT_SMALL)); }
   }
 }
 
@@ -1460,7 +1479,7 @@ static void drawSettings(int x, int y, int sx)
     }
 
     spr.setTextDatum(MC_DATUM);
-    spr.drawString(settings[abs((settingsIdx+count+i)%count)], 40+x+(sx/2), 64+y+(i*16), FONT_SMALL);
+    { const char *mi = settings[abs((settingsIdx+count+i)%count)]; spr.drawString(mi, 40+x+(sx/2), 64+y+(i*16), fontSmall(mi, FONT_SMALL)); }
   }
 }
 
@@ -1902,8 +1921,9 @@ static void drawAgc(int x, int y, int sx)
   // rx.getAutomaticGainControl();
   if(!agcNdx && !agcIdx)
   {
+    spr.setFont(fontLarge("增益", &lgfx::fonts::Orbitron_Light_24));
+    spr.drawString("增益", 40+x+(sx/2), 48+y);
     spr.setFont(&lgfx::fonts::Orbitron_Light_24);
-    spr.drawString("AGC", 40+x+(sx/2), 48+y);
     spr.drawString("On", 40+x+(sx/2), 72+y);
     spr.setFont(FONT_DEFAULT);
   }
@@ -1982,7 +2002,7 @@ static void drawAvc(int x, int y, int sx)
     spr.drawString("Hold", 40+x+(sx/2), 60+y, FONT_LARGE);
     return;
   }
-  spr.drawString("Max Gain", 40+x+(sx/2), 32+y, FONT_SMALL);
+  spr.drawString("最大增益", 40+x+(sx/2), 32+y, fontSmall("最大增益", FONT_SMALL));
 
   // Only show AVC for AM and SSB modes
   if(currentMode!=FM)
@@ -2134,30 +2154,30 @@ static void drawInfo(int x, int y, int sx)
   spr.fillRoundRect(1+x, 1+y, 76+sx, 110, 4, TH.box_bg);
   spr.drawRoundRect(1+x, 1+y, 76+sx, 110, 4, TH.box_border);
 
-  spr.drawString("Step:", 6+x, 64+y+(-3*16), FONT_SMALL);
-  spr.drawString(getCurrentStep()->desc, 48+x, 64+y+(-3*16), FONT_SMALL);
+  spr.drawString("步进", 6+x, 64+y+(-3*16), fontSmall("步进", FONT_SMALL));
+  spr.drawString(getCurrentStep()->desc, 48+x, 64+y+(-3*16), fontSmall(getCurrentStep()->desc, FONT_SMALL));
 
-  spr.drawString("BW:", 6+x, 64+y+(-2*16), FONT_SMALL);
-  spr.drawString(getCurrentBandwidth()->desc, 48+x, 64+y+(-2*16), FONT_SMALL);
+  spr.drawString("带宽", 6+x, 64+y+(-2*16), fontSmall("带宽", FONT_SMALL));
+  spr.drawString(getCurrentBandwidth()->desc, 48+x, 64+y+(-2*16), fontSmall(getCurrentBandwidth()->desc, FONT_SMALL));
 
   if(!agcNdx && !agcIdx)
   {
-    spr.drawString("AGC:", 6+x, 64+y+(-1*16), FONT_SMALL);
-    spr.drawString("On", 48+x, 64+y+(-1*16), FONT_SMALL);
+    spr.drawString("增益", 6+x, 64+y+(-1*16), fontSmall("增益", FONT_SMALL));
+    spr.drawString("On", 48+x, 64+y+(-1*16), fontSmall("On", FONT_SMALL));
   }
   else
   {
     sprintf(text, "%2.2d", agcNdx);
-    spr.drawString("Att:", 6+x, 64+y+(-1*16), FONT_SMALL);
-    spr.drawString(text, 48+x, 64+y+(-1*16), FONT_SMALL);
+    spr.drawString("衰减", 6+x, 64+y+(-1*16), fontSmall("衰减", FONT_SMALL));
+    spr.drawString(text, 48+x, 64+y+(-1*16), fontSmall(text, FONT_SMALL));
   }
 
-  spr.drawString("Vol:", 6+x, 64+y+(0*16), FONT_SMALL);
+  spr.drawString("音量", 6+x, 64+y+(0*16), fontSmall("音量", FONT_SMALL));
   if(muteOn(MUTE_MAIN) || muteOn(MUTE_SQUELCH))
   {
     spr.setTextColor(TH.box_off_text, TH.box_off_bg);
-    sprintf(text, muteOn(MUTE_MAIN) ? "Muted" : "%d/sq", volume);
-    spr.drawString(text, 48+x, 64+y+(0*16), FONT_SMALL);
+    sprintf(text, muteOn(MUTE_MAIN) ? "静音" : "%d/sq", volume);
+    spr.drawString(text, 48+x, 64+y+(0*16), fontSmall(text, FONT_SMALL));
     spr.setTextColor(TH.box_text);
   }
   else
@@ -2171,50 +2191,42 @@ static void drawInfo(int x, int y, int sx)
   if(piCode && currentMode == FM)
   {
     sprintf(text, "%04X", piCode);
-    spr.drawString("PI:", 6+x, 64+y + (1*16), FONT_SMALL);
-    spr.drawString(text, 48+x, 64+y + (1*16), FONT_SMALL);
+    spr.drawString("PI:", 6+x, 64+y + (1*16), fontSmall("PI:", FONT_SMALL));
+    spr.drawString(text, 48+x, 64+y + (1*16), fontSmall(text, FONT_SMALL));
   }
   else
   {
-    spr.drawString("AVC:", 6+x, 64+y + (1*16), FONT_SMALL);
+    spr.drawString("补偿", 6+x, 64+y + (1*16), fontSmall("补偿", FONT_SMALL));
 
     if(currentMode==FM)
-      sprintf(text, "n/a");
+      sprintf(text, "--");
     else if(isSSB() && ssbAvcHold)
-      sprintf(text, "Hold");
+      sprintf(text, "保持");
     else if(isSSB())
       sprintf(text, "%2.2ddB", SsbAvcIdx);
     else
       sprintf(text, "%2.2ddB", AmAvcIdx);
 
-    spr.drawString(text, 48+x, 64+y + (1*16), FONT_SMALL);
+    spr.drawString(text, 48+x, 64+y + (1*16), fontSmall(text, FONT_SMALL));
   }
 
-  // Alternate the Off Timer countdown with the current date and time.
-  const char *clock = clockGet();
-  uint16_t minutes = offTimerRemainingMinutes();
-  if(minutes && (!clock || millis() / BACKGROUND_REFRESH_TIME % 2))
+  // 第三行：当前输入模式（步进 / 搜索）
   {
-    snprintf(text, sizeof(text), "%02u:%02u", minutes / 60, minutes % 60);
-    spr.drawString("Zzz:", 6+x, 64+y+(2*16), FONT_SMALL);
-    spr.drawString(text, 48+x, 64+y+(2*16), FONT_SMALL);
-  }
-  else if(clock)
-  {
-    uint16_t year;
-    uint8_t month, day, weekday;
-    char date[6];
-    const char *label = "Time:";
+    const char *modeText = seekRotate ? "搜索模式" : "步进模式";
+    const int cy = 64+y+(2*16);
 
-    if(clockGetDate(&year, &month, &day, &weekday))
+    if(seekRotate)
     {
-      if(month > 12 || day > 31) return;
-      sprintf(date, "%02d.%02d", month, day);
-      label = date;
+      spr.fillRoundRect(4+x, cy-9, 78, 18, 3, TH.menu_hl_bg);
+      spr.setTextColor(TH.menu_hl_text);
     }
+    else
+      spr.setTextColor(TH.box_text);
 
-    spr.drawString(label, 6+x, 64+y+(2*16), FONT_SMALL);
-    spr.drawString(clock, 48+x, 64+y+(2*16), FONT_SMALL);
+    spr.setTextDatum(MC_DATUM);
+    spr.drawString(modeText, 43+x, cy, fontSmall(modeText, FONT_SMALL));
+    spr.setTextDatum(ML_DATUM);
+    spr.setTextColor(TH.box_text);
   }
 }
 

@@ -27,7 +27,7 @@
 #define MIN_ELAPSED_RSSI_TIME  200  // RSSI check uses IN_ELAPSED_RSSI_TIME * 6 = 1.2s
 #define ELAPSED_COMMAND      10000  // time to turn off the last command controlled by encoder. Time to goes back to the VFO control // G8PTN: Increased time and corrected comment
 #define DEFAULT_VOLUME          35  // change it for your favorite sound volume
-#define DEFAULT_SLEEP            0  // Default sleep interval, range = 0 (off) to 255 in steps of 5
+#define DEFAULT_SLEEP           30  // Default sleep interval, range = 0 (off) to 255 in steps of 5
 #define RDS_CHECK_TIME         250  // Increased from 90
 #define SEEK_TIMEOUT        600000  // Max seek timeout (ms)
 #define SCHEDULE_CHECK_TIME   2000  // How often to identify the same frequency (ms)
@@ -42,7 +42,8 @@ int8_t agcNdx = 0;
 int8_t softMuteMaxAttIdx = 4;
 
 volatile bool seekStop = false; // G8PTN: Added flag to abort seeking on rotary encoder detection
-bool pushAndRotate = false;   // Combined physical/BLE gesture state for the display
+bool pushAndRotate = false;
+bool seekRotate = false;   // 搜索模式：旋钮转动即跳台，而非按步进调谐   // Combined physical/BLE gesture state for the display
 
 long elapsedRSSI = millis();
 long elapsedButton = millis();
@@ -705,6 +706,9 @@ bool handleRotation(int16_t enc, int16_t accelerated, bool pressed)
     switch(currentCmd)
     {
       case CMD_NONE:
+        changed = seekRotate ? doSeek(enc, accelerated) : doTune(accelerated);
+        prefsRequestSave(SAVE_CUR_BAND);
+        break;
       case CMD_SCAN:
         changed = doTune(accelerated);
         prefsRequestSave(SAVE_CUR_BAND);
@@ -776,15 +780,63 @@ void loop()
   if(encCount && button.isPressed) physicalPushAndRotate = true;
   if(!button.isPressed) physicalPushAndRotate = false;
 
+  // 手势分工（按用户按键表 v2）：
+  //   主界面 : 单击=音量  中按=切步进/搜索  双击=主菜单  长按=无动作
+  //   音量   : 单击=退出   长按=静音切换
+  //   菜单/子页面: 单击=确认/进入  中按=进入  长按=退出
+  static bool longPressLatch = false;
+  static bool hasLastClick = false;
+  static uint32_t lastClickMs = 0;
+
   if(encCount)
     needRedraw |= handleRotation(encCount, encCountAccel, button.isPressed);
   else if(!physicalPushAndRotate && button.isLongPressed)
   {
-    sleepOn(!sleepOn());
-    elapsedSleep = elapsedCommand = millis();
+    if(!longPressLatch)
+    {
+      longPressLatch = true;
+      if(sleepOn())
+        sleepOn(false);                              // 灭屏时先唤醒
+      else if(currentCmd == CMD_VOLUME)
+        muteOn(MUTE_MAIN, !muteOn(MUTE_MAIN));       // 音量模式：长按=静音切换
+      else if(currentCmd != CMD_NONE)
+        clickLongPress();                            // 菜单/子页面：长按=退出（日期时间页会先保存）
+      // 主界面（CMD_NONE）长按=无动作
+      elapsedSleep = elapsedCommand = millis();
+      needRedraw = true;
+    }
   }
-  else if(!physicalPushAndRotate && (button.wasClicked || button.wasShortPressed))
-    needRedraw |= handleClick(button.wasShortPressed);
+  else if(!physicalPushAndRotate && button.wasShortPressed)
+  {
+    // 中按 0.5~2s
+    if(currentCmd == CMD_NONE && !sleepOn())
+    {
+      seekRotate = !seekRotate;                      // 主界面：切换 步进/搜索
+      needRedraw = true;
+    }
+    else
+      needRedraw |= handleClick(false);              // 其余交给原逻辑（菜单=进入）
+  }
+  else if(!physicalPushAndRotate && button.wasClicked)
+  {
+    if(hasLastClick && (millis() - lastClickMs) < 400)
+    {
+      hasLastClick = false;
+      if(seekRotate)
+        seekRotate = false;                          // 搜索模式：双击=退回步进
+      else
+        currentCmd = CMD_MENU;                       // 步进模式：双击=打开主菜单
+      elapsedSleep = elapsedCommand = millis();
+      needRedraw = true;
+    }
+    else
+    {
+      hasLastClick = true;
+      lastClickMs = millis();
+      needRedraw |= handleClick(true);               // 单击立即生效
+    }
+  }
+  if(!button.isPressed) longPressLatch = false;
 
   // Each source executes independently, so simultaneous inputs are not lost.
   needRedraw |= serialLoop(usbModeIdx);
@@ -858,6 +910,14 @@ void loop()
 
   // Expire status messages even when no other display content changes.
   needRedraw |= statusTick(millis());
+
+  // 台名超长时周期推进滚动（约 3 帧/秒）
+  static uint32_t lastScrollTick = 0;
+  if(currentTime - lastScrollTick >= 330)
+  {
+    lastScrollTick = currentTime;
+    needRedraw |= stationScrollTick();
+  }
 
   // Redraw screen if necessary
   if(needRedraw) drawScreen();

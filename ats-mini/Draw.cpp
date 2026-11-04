@@ -1,4 +1,5 @@
 #include "Common.h"
+#include "CnFont.h"
 #include "Themes.h"
 #include "Storage.h"
 #include "Utils.h"
@@ -352,11 +353,45 @@ void drawStereoIndicator(int x, int y, bool stereo)
 //
 // Draw RDS station name (also CB channel, etc)
 //
+// 台名滚动：固定 4 个汉字的显示窗口，超长时循环滚动
+static bool    stScrollActive = false;
+static int16_t stScrollOffset = 0;
+static int16_t stNameWidth    = 0;
+static const int16_t ST_WINDOW_W = 96;   // 4 个 24px 汉字宽
+
 void drawStationName(const char *name, int x, int y)
 {
-  spr.setTextDatum(TC_DATUM);
+  const lgfx::IFont *f = fontLarge(name, FONT_LARGE);
+  spr.setFont(f);
+  stNameWidth = spr.textWidth(name);
+
   spr.setTextColor(TH.rds_text);
-  spr.drawString(name, x, y, FONT_LARGE);
+  stScrollActive = (stNameWidth > ST_WINDOW_W);
+
+  if(!stScrollActive)
+  {
+    stScrollOffset = 0;
+    spr.setTextDatum(TC_DATUM);
+    spr.drawString(name, x, y);
+    return;
+  }
+
+  // 超长：裁剪出 4 字宽窗口，按偏移绘制
+  int16_t left = x - ST_WINDOW_W / 2;
+  spr.setClipRect(left, y - 2, ST_WINDOW_W, 30);
+  spr.setTextDatum(TL_DATUM);
+  spr.drawString(name, left - stScrollOffset, y);
+  spr.clearClipRect();
+  spr.setTextDatum(TC_DATUM);
+}
+
+// 由主循环周期调用；返回 true 表示需要重绘一帧
+bool stationScrollTick(void)
+{
+  if(!stScrollActive) return false;
+  stScrollOffset += 6;
+  if(stScrollOffset > stNameWidth + 16) stScrollOffset = 0;   // 滚完留一点空白再回卷
+  return true;
 }
 
 //
